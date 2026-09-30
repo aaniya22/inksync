@@ -46,12 +46,13 @@ const flushSave = async (docId) => {
   pendingSaves.delete(docId);
   try {
     const ydoc = await getYDoc(docId);
-    await Document.findByIdAndUpdate(docId, {
+    const saved = await Document.findByIdAndUpdate(docId, {
       content: ydoc.getText("content").toString(),
       ydoc: Buffer.from(Y.encodeStateAsUpdate(ydoc)),
       lastEditedBy: pending.userId,
       lastEditedAt: new Date(),
     });
+    if (!saved) ydocs.delete(docId);
   } catch (err) {
     console.error("Save failed for", docId, err.message);
   }
