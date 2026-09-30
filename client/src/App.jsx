@@ -123,6 +123,38 @@ export default function App() {
     }
   };
 
+  const renameDoc = async (d) => {
+    const title = window.prompt("New title", d.title);
+    if (!title || title === d.title) return;
+    try {
+      await api(`/documents/${d._id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+      await loadDocs();
+    } catch (e) {
+      setStatus(`error: ${e.message}`);
+    }
+  };
+
+  const deleteDoc = async (d) => {
+    if (!window.confirm(`Delete "${d.title}"?`)) return;
+    try {
+      await api(`/documents/${d._id}`, { method: "DELETE" });
+      if (d._id === docId) {
+        socketRef.current?.disconnect();
+        ydocRef.current = null;
+        setDocId("");
+        setContent("");
+        setPeople([]);
+        setStatus("deleted");
+      }
+      await loadDocs();
+    } catch (e) {
+      setStatus(`error: ${e.message}`);
+    }
+  };
+
   const onChange = (e) => {
     const ydoc = ydocRef.current;
     if (!ydoc) return;
@@ -211,6 +243,12 @@ export default function App() {
                   style={{ fontWeight: d._id === docId ? "bold" : "normal" }}
                 >
                   {d.title}
+                </button>
+                <button onClick={() => renameDoc(d)} style={{ marginLeft: 8 }}>
+                  Rename
+                </button>
+                <button onClick={() => deleteDoc(d)} style={{ marginLeft: 8 }}>
+                  Delete
                 </button>
               </li>
             ))}
