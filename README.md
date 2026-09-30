@@ -24,11 +24,12 @@ To test collaboration, sign up a second user in an incognito window, share the d
 - Email/password auth with JWT
 - Document list, create, and share by email (owner only)
 - Live sync over WebSockets with debounced saves to MongoDB
+- Conflict-free concurrent editing with Yjs (CRDT)
 - Presence: see who is currently in a document
 
 ## Known limitations
 
-- Last-write-wins: two people typing at the same moment can overwrite each other. Planned fix: Yjs.
+- Plain-text only, no rich formatting yet
 
 ## Environment variables
 
