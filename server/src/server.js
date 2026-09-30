@@ -64,6 +64,7 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id, "user:", socket.userId);
 
   socket.on("join-document", async (docId, cb) => {
+    await flushSave(docId);
     let doc;
     try {
       doc = await Document.findOne({
