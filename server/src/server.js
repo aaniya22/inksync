@@ -34,6 +34,32 @@ io.use((socket, next) => {
   }
 });
 
+const pendingSaves = new Map();
+const SAVE_DELAY_MS = 500;
+
+const flushSave = async (docId) => {
+  const pending = pendingSaves.get(docId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSaves.delete(docId);
+  try {
+    await Document.findByIdAndUpdate(docId, {
+      content: pending.content,
+      lastEditedBy: pending.userId,
+      lastEditedAt: new Date(),
+    });
+  } catch (err) {
+    console.error("Save failed for", docId, err.message);
+  }
+};
+
+const scheduleSave = (docId, content, userId) => {
+  const existing = pendingSaves.get(docId);
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => flushSave(docId), SAVE_DELAY_MS);
+  pendingSaves.set(docId, { timer, content, userId });
+};
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id, "user:", socket.userId);
 
@@ -58,20 +84,21 @@ io.on("connection", (socket) => {
     if (!socket.rooms.has(`doc:${docId}`)) {
       return cb?.({ ok: false, error: "Join the document first" });
     }
-    socket.to(`doc:${docId}`).emit("doc-update", { content, userId: socket.userId });
-    try {
-      await Document.findByIdAndUpdate(docId, {
-        content,
-        lastEditedBy: socket.userId,
-        lastEditedAt: new Date(),
-      });
-      cb?.({ ok: true });
-    } catch {
-      cb?.({ ok: false, error: "Save failed" });
+    socket
+      .to(`doc:${docId}`)
+      .emit("doc-update", { content, userId: socket.userId });
+    scheduleSave(docId, content, socket.userId);
+    cb?.({ ok: true });
+  });
+
+  socket.on("disconnecting", () => {
+    for (const room of socket.rooms) {
+      if (room.startsWith("doc:")) flushSave(room.slice(4));
     }
   });
 
   socket.on("leave-document", (docId) => {
+    flushSave(docId);
     socket.leave(`doc:${docId}`);
     socket.to(`doc:${docId}`).emit("user-left", { userId: socket.userId });
     console.log(`${socket.userId} left doc:${docId}`);
