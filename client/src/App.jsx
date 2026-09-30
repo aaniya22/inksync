@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import * as Y from "yjs";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [docs, setDocs] = useState([]);
@@ -28,7 +30,7 @@ export default function App() {
         socketRef.current?.emit("doc-change", { docId: id, update });
       }
     });
-    const socket = io("http://localhost:5000", { auth: { token } });
+    const socket = io(API_URL, { auth: { token } });
     socketRef.current = socket;
     socket.on("connect_error", (e) => setStatus(`error: ${e.message}`));
     socket.on("connect", () => {
@@ -46,7 +48,7 @@ export default function App() {
   useEffect(() => () => socketRef.current?.disconnect(), []);
 
   const api = async (path, options = {}) => {
-    const res = await fetch(`http://localhost:5000/api${path}`, {
+    const res = await fetch(`${API_URL}/api${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
