@@ -6,6 +6,7 @@ import cors from "cors";
 import jwt from "jsonwebtoken";
 import Document from "./models/Document.js";
 import User from "./models/User.js";
+import * as Y from "yjs";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import documentRoutes from "./routes/documents.js";
@@ -44,8 +45,10 @@ const flushSave = async (docId) => {
   clearTimeout(pending.timer);
   pendingSaves.delete(docId);
   try {
+    const ydoc = await getYDoc(docId);
     await Document.findByIdAndUpdate(docId, {
-      content: pending.content,
+      content: ydoc.getText("content").toString(),
+      ydoc: Buffer.from(Y.encodeStateAsUpdate(ydoc)),
       lastEditedBy: pending.userId,
       lastEditedAt: new Date(),
     });
@@ -54,11 +57,31 @@ const flushSave = async (docId) => {
   }
 };
 
-const scheduleSave = (docId, content, userId) => {
+const scheduleSave = (docId, userId) => {
   const existing = pendingSaves.get(docId);
   if (existing) clearTimeout(existing.timer);
   const timer = setTimeout(() => flushSave(docId), SAVE_DELAY_MS);
-  pendingSaves.set(docId, { timer, content, userId });
+  pendingSaves.set(docId, { timer, userId });
+};
+
+const ydocs = new Map();
+const getYDoc = (docId) => {
+  if (!ydocs.has(docId)) {
+    ydocs.set(
+      docId,
+      (async () => {
+        const doc = await Document.findById(docId).select("content ydoc");
+        const ydoc = new Y.Doc();
+        if (doc?.ydoc?.length) {
+          Y.applyUpdate(ydoc, new Uint8Array(doc.ydoc));
+        } else {
+          ydoc.getText("content").insert(0, doc?.content ?? "");
+        }
+        return ydoc;
+      })(),
+    );
+  }
+  return ydocs.get(docId);
 };
 
 const broadcastPresence = async (docId) => {
@@ -86,21 +109,22 @@ io.on("connection", (socket) => {
     } catch {
       return cb?.({ ok: false, error: "Invalid document id" });
     }
+    const ydoc = await getYDoc(docId);
     socket.join(`doc:${docId}`);
-    cb?.({ ok: true, content: doc.content ?? "" });
+    cb?.({ ok: true, state: Y.encodeStateAsUpdate(ydoc) });
     socket.to(`doc:${docId}`).emit("user-joined", { userId: socket.userId });
     broadcastPresence(docId);
     console.log(`${socket.userId} joined doc:${docId}`);
   });
 
-  socket.on("doc-change", async ({ docId, content }, cb) => {
+  socket.on("doc-change", async ({ docId, update }, cb) => {
     if (!socket.rooms.has(`doc:${docId}`)) {
       return cb?.({ ok: false, error: "Join the document first" });
     }
-    socket
-      .to(`doc:${docId}`)
-      .emit("doc-update", { content, userId: socket.userId });
-    scheduleSave(docId, content, socket.userId);
+    const ydoc = await getYDoc(docId);
+    Y.applyUpdate(ydoc, new Uint8Array(update));
+    socket.to(`doc:${docId}`).emit("doc-update", { update });
+    scheduleSave(docId, socket.userId);
     cb?.({ ok: true });
   });
 

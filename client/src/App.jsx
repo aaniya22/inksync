@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import * as Y from "yjs";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -13,20 +14,32 @@ export default function App() {
   const [content, setContent] = useState("");
   const [status, setStatus] = useState("disconnected");
   const socketRef = useRef(null);
+  const ydocRef = useRef(null);
 
   const connect = (id) => {
     setDocId(id);
     socketRef.current?.disconnect();
+    const ydoc = new Y.Doc();
+    const ytext = ydoc.getText("content");
+    ydocRef.current = ydoc;
+    ytext.observe(() => setContent(ytext.toString()));
+    ydoc.on("update", (update, origin) => {
+      if (origin !== "remote") {
+        socketRef.current?.emit("doc-change", { docId: id, update });
+      }
+    });
     const socket = io("http://localhost:5000", { auth: { token } });
     socketRef.current = socket;
     socket.on("connect_error", (e) => setStatus(`error: ${e.message}`));
     socket.on("connect", () => {
       socket.emit("join-document", id, (res) => {
         setStatus(res.ok ? "joined" : `error: ${res.error}`);
-        if (res.ok) setContent(res.content);
+        if (res.ok) Y.applyUpdate(ydoc, new Uint8Array(res.state), "remote");
       });
     });
-    socket.on("doc-update", (d) => setContent(d.content));
+    socket.on("doc-update", (d) =>
+      Y.applyUpdate(ydoc, new Uint8Array(d.update), "remote"),
+    );
     socket.on("presence", setPeople);
   };
 
@@ -111,8 +124,32 @@ export default function App() {
   };
 
   const onChange = (e) => {
-    setContent(e.target.value);
-    socketRef.current?.emit("doc-change", { docId, content: e.target.value });
+    const ydoc = ydocRef.current;
+    if (!ydoc) return;
+    const ytext = ydoc.getText("content");
+    const oldText = ytext.toString();
+    const newText = e.target.value;
+    let start = 0;
+    while (
+      start < oldText.length &&
+      start < newText.length &&
+      oldText[start] === newText[start]
+    )
+      start++;
+    let oldEnd = oldText.length;
+    let newEnd = newText.length;
+    while (
+      oldEnd > start &&
+      newEnd > start &&
+      oldText[oldEnd - 1] === newText[newEnd - 1]
+    ) {
+      oldEnd--;
+      newEnd--;
+    }
+    ydoc.transact(() => {
+      if (oldEnd > start) ytext.delete(start, oldEnd - start);
+      if (newEnd > start) ytext.insert(start, newText.slice(start, newEnd));
+    });
   };
 
   return (
