@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import Document from "./models/Document.js";
+import User from "./models/User.js";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import documentRoutes from "./routes/documents.js";
@@ -60,6 +61,16 @@ const scheduleSave = (docId, content, userId) => {
   pendingSaves.set(docId, { timer, content, userId });
 };
 
+const broadcastPresence = async (docId) => {
+  const sockets = await io.in(`doc:${docId}`).fetchSockets();
+  const ids = [...new Set(sockets.map((s) => s.userId))];
+  const users = await User.find({ _id: { $in: ids } }).select("name");
+  io.to(`doc:${docId}`).emit(
+    "presence",
+    users.map((u) => ({ id: u._id, name: u.name })),
+  );
+};
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id, "user:", socket.userId);
 
@@ -78,6 +89,7 @@ io.on("connection", (socket) => {
     socket.join(`doc:${docId}`);
     cb?.({ ok: true, content: doc.content ?? "" });
     socket.to(`doc:${docId}`).emit("user-joined", { userId: socket.userId });
+    broadcastPresence(docId);
     console.log(`${socket.userId} joined doc:${docId}`);
   });
 
@@ -93,15 +105,18 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnecting", () => {
-    for (const room of socket.rooms) {
-      if (room.startsWith("doc:")) flushSave(room.slice(4));
-    }
+    const docIds = [...socket.rooms]
+      .filter((r) => r.startsWith("doc:"))
+      .map((r) => r.slice(4));
+    docIds.forEach(flushSave);
+    socket.once("disconnect", () => docIds.forEach(broadcastPresence));
   });
 
   socket.on("leave-document", (docId) => {
     flushSave(docId);
     socket.leave(`doc:${docId}`);
     socket.to(`doc:${docId}`).emit("user-left", { userId: socket.userId });
+    broadcastPresence(docId);
     console.log(`${socket.userId} left doc:${docId}`);
   });
 });

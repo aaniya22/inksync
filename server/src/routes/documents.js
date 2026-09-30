@@ -1,5 +1,6 @@
 import express from "express";
 import Document from "../models/Document.js";
+import User from "../models/User.js";
 import auth from "../middleware/auth.js";
 
 const router = express.Router();
@@ -32,7 +33,8 @@ router.post("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   const doc = await Document.findById(req.params.id);
   if (!doc) return res.status(404).json({ message: "Not found" });
-  if (!canAccess(doc, req.userId)) return res.status(403).json({ message: "Forbidden" });
+  if (!canAccess(doc, req.userId))
+    return res.status(403).json({ message: "Forbidden" });
   res.json(doc);
 });
 
@@ -40,7 +42,8 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   const doc = await Document.findById(req.params.id);
   if (!doc) return res.status(404).json({ message: "Not found" });
-  if (!canAccess(doc, req.userId)) return res.status(403).json({ message: "Forbidden" });
+  if (!canAccess(doc, req.userId))
+    return res.status(403).json({ message: "Forbidden" });
   doc.title = req.body.title;
   doc.lastEditedBy = req.userId;
   doc.lastEditedAt = new Date();
@@ -57,6 +60,26 @@ router.delete("/:id", async (req, res) => {
   }
   await doc.deleteOne();
   res.status(204).end();
+});
+
+// Add collaborator by email (owner only)
+router.post("/:id/collaborators", async (req, res) => {
+  const doc = await Document.findById(req.params.id);
+  if (!doc) return res.status(404).json({ message: "Not found" });
+  if (!doc.owner.equals(req.userId)) {
+    return res.status(403).json({ message: "Only the owner can share" });
+  }
+  const user = await User.findOne({ email: req.body.email });
+  if (!user)
+    return res.status(404).json({ message: "No user with that email" });
+  if (
+    !doc.owner.equals(user._id) &&
+    !doc.collaborators.some((c) => c.equals(user._id))
+  ) {
+    doc.collaborators.push(user._id);
+    await doc.save();
+  }
+  res.json(doc);
 });
 
 export default router;
